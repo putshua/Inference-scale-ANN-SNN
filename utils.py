@@ -6,31 +6,63 @@ import numpy as np
 import random
 import os
 
-def snn_inference(dataloader, model, device, timesteps, st=16):
+def cal_delay_time(dataloader, model, device):
+    model.eval()
+    model = model.to(device)
     for module in model.modules():
         if isinstance(module, (SpikingNeuron, SpikingNeuron2d, SpikingNeuron4d)):
-            module.mode = "snn"
-    tot = np.zeros(timesteps)
-    sops = np.zeros(timesteps)
-    model.eval()
-    model.to(device)
-    length = 0
-    length2 = 0
+            module.mode = "clip"
     with torch.no_grad():
         for img, label in tqdm(dataloader):
             img = img.to(device)
             label = label.to(device)
+            out = model(img)
+            break
+    time = 0.
+    for module in model.modules():
+        if isinstance(module, (SpikingNeuron, SpikingNeuron2d, SpikingNeuron4d)):
+            if isinstance(module.r, torch.Tensor):
+                r = module.r.item()
+            else:
+                r = module.r
+            print(r)
+            time += r
+    return int(time)
+
+def snn_inference(dataloader, model, device, timesteps):
+    for module in model.modules():
+        if isinstance(module, (SpikingNeuron, SpikingNeuron2d, SpikingNeuron4d)):
+            module.mode = "snn"
+
+    tot = np.zeros((timesteps, timesteps))
+    model.eval()
+    model = model.to(device)
+    length = 0
+    length2 = 0
+    cnt = 0
+    with torch.no_grad():
+        for img, label in tqdm((dataloader)):
+            cnt += 1
+            img = img.to(device)
+            label = label.to(device)
             outs = []
             for t in range(timesteps):
-                outs.append(model(img))
-
+                ttmp = model(img)
+                # print("t: ", t, " -> ", ttmp.mean())
+                outs.append(ttmp)
             out_spike = torch.stack(outs, 0)
-            out_spike[:st] = torch.cumsum(out_spike[:st], dim=0)
-            out_spike[st:] = torch.cumsum(out_spike[st:], dim=0)
+            # start from i-th timestep
+            for i in range(timesteps):
+                # out = torch.zeros_like(out_spike)
+                # end at j-th timestep
+                for j in range(i, timesteps):
+                    tmp = out_spike[i:j+1,...].sum(0)
+                    tot[i,j] += (label==tmp.max(1)[1]).sum().data
+                # for k in range(timesteps):
+                    # tot[k] += (label==out[k].max(1)[1]).sum().data
             reset_model(model)
             length += len(label)
-            for i in range(timesteps):
-                tot[i] += (label==out_spike[i].max(1)[1]).sum().data
+            length2 += 1
     return tot/length
 
 def evaluate(test_dataloader, model, device):
