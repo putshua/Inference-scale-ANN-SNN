@@ -22,6 +22,7 @@ class SpikingNeuron(nn.Module):
         self.total_count = 0
         self.spike_count = 0
         self.op = 0.
+        self.r = 0.
         self.register_buffer("c", c)
         self.register_buffer("macs", torch.tensor(0.))
 
